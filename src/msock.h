@@ -46,6 +46,14 @@ typedef unsigned int in_addr_t;
 SOCKET mcast_send_socket(char* multicastIP, char* multicastPort,  int multicastTTL, struct addrinfo **multicastAddr);
 
 /**
+   Send message on all multicast-capable interfaces
+
+   On success, returns 0. On error, returns -1 (error message already printed).
+*/
+int mcast_sendto_all(int sockfd, const void *buf, size_t len, int flags,
+		     const struct sockaddr *dest_addr, socklen_t addrlen);
+
+/**
    Creates a socket suitable for receiving multicast datagrams via recvfrom(). Also sets socket recv buffer.
    
    On success, returns socket.

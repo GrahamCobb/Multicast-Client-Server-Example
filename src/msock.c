@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 
 #include "msock.h"
 
@@ -103,6 +105,52 @@ SOCKET mcast_send_socket(char* multicastIP, char* multicastPort,  int multicastT
 
 }
 
+/* Send message on all interfaces */
+int mcast_sendto_all(int sockfd, const void *buf, size_t len, int flags,
+                      const struct sockaddr *dest_addr, socklen_t addrlen) {
+
+    struct ifaddrs *ifaddr, *ifa;
+
+    if (getifaddrs(&ifaddr) != 0) {
+	perror("getifaddrs() failed");
+	return -1;
+    }
+
+    /* Loop through all multicast-capable interfaces */
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+	if (ifa->ifa_addr == NULL) continue;
+	if (ifa->ifa_addr->sa_family != dest_addr->sa_family) continue;
+	if ((ifa->ifa_flags & IFF_MULTICAST) == 0) continue;
+
+	/* Select this interface */
+	printf("Sending to interface %s\n", ifa->ifa_name);
+	if (ifa->ifa_addr->sa_family == AF_INET) {
+	    if (setsockopt (sockfd, IPPROTO_IP, IP_MULTICAST_IF,
+			    ifa->ifa_addr, sizeof(struct sockaddr_in)) != 0) {
+		perror("setsockopt failed selecting IPv4 interface");
+		freeifaddrs(ifaddr);
+		return -1;
+	    }
+	}
+	if (ifa->ifa_addr->sa_family == AF_INET6) {
+	    if (setsockopt (sockfd, IPPROTO_IPV6, IPV6_MULTICAST_IF,
+			    ifa->ifa_addr, sizeof(struct sockaddr_in6)) != 0) {
+		perror("setsockopt() failed selecting IPv6 interface");
+		freeifaddrs(ifaddr);
+		return -1;
+	    }
+	}
+
+	if (sendto(sockfd, buf, len, flags, dest_addr, addrlen) != len) {
+	    perror("sendto() sent a different number of bytes than expected");
+	    freeifaddrs(ifaddr);
+	    return -1;
+	}
+    }
+
+    freeifaddrs(ifaddr);
+    return 0;
+}
 
 
 SOCKET mcast_recv_socket(char* multicastIP, char* multicastPort, int multicastRecvBufSize) {

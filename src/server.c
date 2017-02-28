@@ -85,9 +85,9 @@ int main(int argc, char *argv[])
       int*  p_nr = (int*)sendString;
       *p_nr = htonl(nr);
  
-      if ( sendto(sock, sendString, sendStringLen, 0,
-		  multicastAddr->ai_addr, multicastAddr->ai_addrlen) != sendStringLen )
-	DieWithError("sendto() sent a different number of bytes than expected");
+      if ( mcast_sendto_all(sock, sendString, sendStringLen, 0,
+		  multicastAddr->ai_addr, multicastAddr->ai_addrlen) != 0 )
+	DieWithError("error sending");
         
       fprintf(stderr, "packet %d sent\n", nr);
       nr++;
