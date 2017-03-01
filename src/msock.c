@@ -160,6 +160,8 @@ SOCKET mcast_recv_socket(char* multicastIP, char* multicastPort, int multicastRe
     struct addrinfo*  localAddr = 0;         /* Local address to bind to */
     struct addrinfo*  multicastAddr = 0;     /* Multicast Address */
     int yes=1;
+    struct ifaddrs *ifaddr = 0;
+    struct ifaddrs *ifa;
   
 #ifdef WIN32
     WSADATA trash;
@@ -238,58 +240,79 @@ SOCKET mcast_recv_socket(char* multicastIP, char* multicastPort, int multicastRe
   
     
     
-    /* Join the multicast group. We do this seperately depending on whether we
-     * are using IPv4 or IPv6. 
-     */
-    if ( multicastAddr->ai_family  == PF_INET &&  
-	 multicastAddr->ai_addrlen == sizeof(struct sockaddr_in) ) /* IPv4 */
-	{
-	    struct ip_mreq multicastRequest;  /* Multicast address join structure */
-
-	    /* Specify the multicast group */
-	    memcpy(&multicastRequest.imr_multiaddr,
-		   &((struct sockaddr_in*)(multicastAddr->ai_addr))->sin_addr,
-		   sizeof(multicastRequest.imr_multiaddr));
-
-	    /* Accept multicast from any interface */
-	    multicastRequest.imr_interface.s_addr = htonl(INADDR_ANY);
-
-	    /* Join the multicast address */
-	    if ( setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*) &multicastRequest, sizeof(multicastRequest)) != 0 ) {
-		perror("setsockopt() failed");
-		goto error;
-	    }
-	}
-    else if ( multicastAddr->ai_family  == PF_INET6 &&
-	      multicastAddr->ai_addrlen == sizeof(struct sockaddr_in6) ) /* IPv6 */
-	{
-	    struct ipv6_mreq multicastRequest;  /* Multicast address join structure */
-
-	    /* Specify the multicast group */
-	    memcpy(&multicastRequest.ipv6mr_multiaddr,
-		   &((struct sockaddr_in6*)(multicastAddr->ai_addr))->sin6_addr,
-		   sizeof(multicastRequest.ipv6mr_multiaddr));
-
-	    /* Accept multicast from any interface */
-	    multicastRequest.ipv6mr_interface = 0;
-
-	    /* Join the multicast address */
-	    if ( setsockopt(sock, IPPROTO_IPV6, IPV6_ADD_MEMBERSHIP, (char*) &multicastRequest, sizeof(multicastRequest)) != 0 ) {
-		perror("setsockopt() failed");
-		goto error;
-	    }
-	}
-    else {
-	perror("Neither IPv4 or IPv6"); 
-  	goto error;
+    /* Loop through all multicast-capable interfaces */
+    if (getifaddrs(&ifaddr) != 0) {
+	perror("getifaddrs() failed");
+	goto error;
     }
 
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+	if (ifa->ifa_addr == NULL) continue;
+	if (ifa->ifa_addr->sa_family != multicastAddr->ai_family) continue;
+	if ((ifa->ifa_flags & IFF_MULTICAST) == 0) continue;
+
+	printf("Receiving on interface %s\n", ifa->ifa_name);
+
+	/* Join the multicast group. We do this seperately depending on whether we
+	 * are using IPv4 or IPv6. 
+	 */
+	if ( multicastAddr->ai_family  == PF_INET &&  
+	     multicastAddr->ai_addrlen == sizeof(struct sockaddr_in) ) /* IPv4 */
+	    {
+		struct ip_mreq multicastRequest;  /* Multicast address join structure */
+
+		/* Specify the multicast group */
+		memcpy(&multicastRequest.imr_multiaddr,
+		       &((struct sockaddr_in*)(multicastAddr->ai_addr))->sin_addr,
+		       sizeof(multicastRequest.imr_multiaddr));
+
+		/* Accept multicast on this interface */
+		memcpy(&multicastRequest.imr_interface.s_addr,
+		       &((struct sockaddr_in*)(ifa->ifa_addr))->sin_addr,
+		       sizeof(multicastRequest.imr_interface.s_addr));
+
+		/* Join the multicast address */
+		if ( setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*) &multicastRequest, sizeof(multicastRequest)) != 0 ) {
+		    perror("setsockopt() failed");
+		    goto error;
+		}
+	    }
+	else if ( multicastAddr->ai_family  == PF_INET6 &&
+		  multicastAddr->ai_addrlen == sizeof(struct sockaddr_in6) ) /* IPv6 */
+	    {
+		struct ipv6_mreq multicastRequest;  /* Multicast address join structure */
+
+		/* Specify the multicast group */
+		memcpy(&multicastRequest.ipv6mr_multiaddr,
+		       &((struct sockaddr_in6*)(multicastAddr->ai_addr))->sin6_addr,
+		       sizeof(multicastRequest.ipv6mr_multiaddr));
+
+		/* Accept multicast on this interface */
+		multicastRequest.ipv6mr_interface = if_nametoindex(ifa->ifa_name);
+		if (multicastRequest.ipv6mr_interface == 0) {
+		    perror("if_nametoindex() failed");
+		    goto error;
+		}
+
+		/* Join the multicast address */
+		if ( setsockopt(sock, IPPROTO_IPV6, IPV6_ADD_MEMBERSHIP, (char*) &multicastRequest, sizeof(multicastRequest)) != 0 ) {
+		    perror("setsockopt() failed");
+		    goto error;
+		}
+	    }
+	else {
+	    perror("Neither IPv4 or IPv6"); 
+	    goto error;
+	}
+    }
 
     
     if(localAddr)
 	freeaddrinfo(localAddr);
     if(multicastAddr)
 	freeaddrinfo(multicastAddr);
+    if (ifaddr)
+	freeifaddrs(ifaddr);
     
     return sock;
 
@@ -298,6 +321,8 @@ SOCKET mcast_recv_socket(char* multicastIP, char* multicastPort, int multicastRe
 	freeaddrinfo(localAddr);
     if(multicastAddr)
 	freeaddrinfo(multicastAddr);
+    if (ifaddr)
+	freeifaddrs(ifaddr);
 
     return -1;
 }
