@@ -35,6 +35,10 @@ typedef unsigned int in_addr_t;
 #define IPV6_ADD_MEMBERSHIP IPV6_JOIN_GROUP
 #endif
 
+/* We need to keep track of interface index numbers so we use a simple array.
+ * Assume they go no higher than 255.
+ */
+#define MAX_IF_INDEX 255
 
 
 /**

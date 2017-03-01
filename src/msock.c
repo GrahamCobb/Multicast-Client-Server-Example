@@ -162,6 +162,7 @@ SOCKET mcast_recv_socket(char* multicastIP, char* multicastPort, int multicastRe
     int yes=1;
     struct ifaddrs *ifaddr = 0;
     struct ifaddrs *ifa;
+    unsigned char if_index_used[MAX_IF_INDEX+1];
   
 #ifdef WIN32
     WSADATA trash;
@@ -169,6 +170,7 @@ SOCKET mcast_recv_socket(char* multicastIP, char* multicastPort, int multicastRe
 	DieWithError("Couldn't init Windows Sockets\n");
 #endif
 
+    memset(if_index_used, 0, sizeof(if_index_used[0]) * (MAX_IF_INDEX+1));
     
     /* Resolve the multicast group address */
     hints.ai_family = PF_UNSPEC;
@@ -247,10 +249,19 @@ SOCKET mcast_recv_socket(char* multicastIP, char* multicastPort, int multicastRe
     }
 
     for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+	unsigned int if_index;
 	if (ifa->ifa_addr == NULL) continue;
 	if (ifa->ifa_addr->sa_family != multicastAddr->ai_family) continue;
 	if ((ifa->ifa_flags & IFF_MULTICAST) == 0) continue;
 
+	if_index = if_nametoindex(ifa->ifa_name);
+	if (if_index == 0) {
+	    perror("if_nametoindex() failed");
+	    goto error;
+	}
+	if (if_index_used[if_index]) continue;
+	if_index_used[if_index] = 1;
+	
 	printf("Receiving on interface %s\n", ifa->ifa_name);
 
 	/* Join the multicast group. We do this seperately depending on whether we
@@ -288,11 +299,7 @@ SOCKET mcast_recv_socket(char* multicastIP, char* multicastPort, int multicastRe
 		       sizeof(multicastRequest.ipv6mr_multiaddr));
 
 		/* Accept multicast on this interface */
-		multicastRequest.ipv6mr_interface = if_nametoindex(ifa->ifa_name);
-		if (multicastRequest.ipv6mr_interface == 0) {
-		    perror("if_nametoindex() failed");
-		    goto error;
-		}
+		multicastRequest.ipv6mr_interface = if_index;
 
 		/* Join the multicast address */
 		if ( setsockopt(sock, IPPROTO_IPV6, IPV6_ADD_MEMBERSHIP, (char*) &multicastRequest, sizeof(multicastRequest)) != 0 ) {
